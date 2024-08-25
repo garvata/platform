@@ -31,14 +31,21 @@ var rootCmd = &cobra.Command{
           |_|
 
 repo-watcher is a command-line tool designed to monitor a specified Git repository for changes.
+
 It periodically checks the repository for new commits and can be configured with various options such as:
-- Repository name and URL
-- API token for authentication
-- Branch to watch
+- Repository URL
+- Authentication token
 - Polling interval
 
 This tool is useful for automating workflows that depend on repository updates or for maintaining
-local copies of remote repositories in real-time.`,
+local copies of remote repositories in real-time.
+
+The tool also provides HTTP endpoints for accessing repository information:
+- GET /branches: Returns information about all remote branches
+- GET /branch/{name}: Returns the GZIP compressed contents of a specific branch
+
+These endpoints allow for easy integration with other services and provide a way to retrieve
+up-to-date information about the monitored repository.`,
 	Run: run,
 }
 
@@ -79,7 +86,7 @@ func run(cmd *cobra.Command, args []string) {
 	}()
 
 	// Initialize repository watcher
-	watcher, err := NewRepoWatcher(&config, logger)
+	watcher, err := NewRepoWatcher(ctx, &config, logger)
 	if err != nil {
 		logger.Fatal("Failed to initialize repository watcher", zap.Error(err))
 	}

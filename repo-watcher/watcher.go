@@ -1,16 +1,22 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
 	server "net/http"
 	"sort"
-	"strings"
 	"time"
 
+	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	"github.com/go-git/go-git/v5/storage/memory"
 	"go.uber.org/zap"
 )
 
@@ -25,62 +31,52 @@ type RepoWatcher struct {
 	// repo is the Git repository being watched.
 	repo *git.Repository
 
+	// storer is the storage for the repository.
+	storer *memory.Storage
+
 	// server is the HTTP server for exposing branch information
 	server *server.Server
+
+	// branchContents stores the contents of each branch as a gzip-compressed byte slice
+	branchContents map[string][]byte
+
+	branchLastUpdated map[string]time.Time
+	updatedBranches   map[string]bool
 }
 
 // NewRepoWatcher creates and initializes a new RepoWatcher instance.
 // It clones the specified repository and sets up the watcher with the provided configuration and logger.
-//
-// Parameters:
-//   - config: A pointer to the Config struct containing repository and authentication details.
-//   - logger: A zap.Logger instance for logging operations and errors.
-//
-// Returns:
-//   - A pointer to the initialized RepoWatcher instance.
-//   - An error if the repository cloning fails or any other initialization error occurs.
-func NewRepoWatcher(config *Config, logger *zap.Logger) (*RepoWatcher, error) {
-	// Clone the repository with the provided configuration
-	// Extract repo name from URL
-	repoName := extractRepoName(config.RepoURL)
-
-	repo, err := git.PlainClone(repoName, false, &git.CloneOptions{
+func NewRepoWatcher(ctx context.Context, config *Config, logger *zap.Logger) (*RepoWatcher, error) {
+	logger.Info("Cloning repository", zap.String("url", config.RepoURL))
+	inMemory := memory.NewStorage()
+	fs := memfs.New()
+	repo, err := git.CloneContext(ctx, inMemory, fs, &git.CloneOptions{
 		URL: config.RepoURL,
 		Auth: &http.BasicAuth{
 			Username: "token",
 			Password: config.AuthToken,
 		},
+		Depth:  1,
+		Mirror: true,
 	})
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone repository: %w", err)
 	}
 
-	// Create and return the RepoWatcher instance
 	return &RepoWatcher{
-		config: config,
-		logger: logger,
-		repo:   repo,
+		config:            config,
+		logger:            logger,
+		repo:              repo,
+		storer:            inMemory,
+		branchContents:    make(map[string][]byte),
+		branchLastUpdated: make(map[string]time.Time),
+		updatedBranches:   make(map[string]bool),
 	}, nil
-}
-
-// Helper function to extract repo name from URL
-func extractRepoName(url string) string {
-	parts := strings.Split(url, "/")
-	if len(parts) > 0 {
-		return strings.TrimSuffix(parts[len(parts)-1], ".git")
-	}
-	return ""
 }
 
 // Watch starts the repository watching process.
 // It periodically checks for updates and pulls changes from the remote repository.
-//
-// Parameters:
-//   - ctx: A context.Context for cancellation and timeout control.
-//
-// Returns:
-//   - An error if the watching process encounters any issues or is cancelled.
 func (w *RepoWatcher) Watch(ctx context.Context) error {
 	ticker := time.NewTicker(w.config.PollInterval)
 	defer ticker.Stop()
@@ -93,7 +89,7 @@ func (w *RepoWatcher) Watch(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := w.checkAndPull(); err != nil {
+			if err := w.checkAndPull(ctx); err != nil {
 				w.logger.Error("Failed to check and pull repository", zap.Error(err))
 			}
 		}
@@ -101,22 +97,11 @@ func (w *RepoWatcher) Watch(ctx context.Context) error {
 }
 
 // checkAndPull fetches and pulls the latest changes from the remote repository.
-//
-// This function performs the following steps:
-// 1. Fetches the latest changes from the remote repository.
-// 2. Retrieves the worktree for the local repository.
-// 3. Pulls the changes from the remote repository into the local worktree.
-//
-// If the repository is already up to date, it logs this information.
-// Any errors encountered during the process are wrapped and returned.
-//
-// Returns:
-//   - An error if any step in the process fails, or nil if successful.
-func (w *RepoWatcher) checkAndPull() error {
+func (w *RepoWatcher) checkAndPull(ctx context.Context) error {
 	w.logger.Info("Checking for updates")
 
 	// Fetch the latest changes from the remote repository
-	err := w.repo.Fetch(&git.FetchOptions{
+	err := w.repo.FetchContext(ctx, &git.FetchOptions{
 		Auth: &http.BasicAuth{
 			Username: "token",
 			Password: w.config.AuthToken,
@@ -133,7 +118,7 @@ func (w *RepoWatcher) checkAndPull() error {
 	}
 
 	// Pull the changes from the remote repository
-	err = worktree.Pull(&git.PullOptions{
+	err = worktree.PullContext(ctx, &git.PullOptions{
 		Auth: &http.BasicAuth{
 			Username: "token",
 			Password: w.config.AuthToken,
@@ -142,6 +127,10 @@ func (w *RepoWatcher) checkAndPull() error {
 	})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
 		return fmt.Errorf("failed to pull repository: %w", err)
+	}
+
+	if err := w.updateBranchContents(); err != nil {
+		w.logger.Error("Failed to update branch contents", zap.Error(err))
 	}
 
 	w.logger.Info("Repository is up to date")
@@ -158,24 +147,18 @@ type BranchInfo struct {
 //
 // The server provides the following endpoint:
 // - GET /branches: Returns information about all remote branches
-//
-// If the server encounters an error while starting or running (excluding server closed errors),
-// it logs the error using the RepoWatcher's logger.
+// - GET /branch/{name}: Returns the contents of a specific branch
 func (w *RepoWatcher) startHTTPServer() {
-	// Create a new serve mux for routing HTTP requests
 	mux := server.NewServeMux()
-	// Register the handleBranches function to handle requests to the /branches endpoint
-	mux.HandleFunc("/branches", w.handleBranches)
+	mux.HandleFunc("GET /branches", w.handleBranches)
+	mux.HandleFunc("GET /branches/{name}", w.handleBranchContents)
 
-	// Initialize the HTTP server with the created mux and set it to listen on port 8080
 	w.server = &server.Server{
 		Addr:    ":8080",
 		Handler: mux,
 	}
 
-	// Log that the server is starting
 	w.logger.Info("Starting HTTP server on :8080")
-	// Start the server and log any errors that occur during its lifetime
 	if err := w.server.ListenAndServe(); err != nil && err != server.ErrServerClosed {
 		w.logger.Error("HTTP server error", zap.Error(err))
 	}
@@ -183,16 +166,6 @@ func (w *RepoWatcher) startHTTPServer() {
 
 // handleBranches is an HTTP handler function that responds with information about all remote branches.
 // It retrieves the branch information using the getRemoteBranches method and returns it as JSON.
-//
-// The function performs the following steps:
-// 1. Calls getRemoteBranches to fetch information about all remote branches.
-// 2. If an error occurs during this process, it logs the error and returns a 500 Internal Server Error.
-// 3. If successful, it sets the Content-Type header to application/json.
-// 4. Encodes the branch information as JSON and writes it to the response.
-//
-// The JSON response will be an array of BranchInfo objects, each containing:
-//   - name: The name of the branch (string)
-//   - last_update: The timestamp of the last update to the branch (RFC3339 format)
 func (w *RepoWatcher) handleBranches(rw server.ResponseWriter, r *server.Request) {
 	branches, err := w.getRemoteBranches()
 	if err != nil {
@@ -206,23 +179,6 @@ func (w *RepoWatcher) handleBranches(rw server.ResponseWriter, r *server.Request
 }
 
 // getRemoteBranches retrieves information about all remote branches for the repository.
-//
-// This function performs the following steps:
-// 1. Fetches the "origin" remote for the repository.
-// 2. Lists all references (branches, tags, etc.) from the remote.
-// 3. Filters the references to include only branches.
-// 4. For each branch, retrieves the latest commit information.
-// 5. Creates a BranchInfo struct for each branch, containing its name and last update time.
-// 6. Sorts the branches by last update time, with the most recently updated first.
-//
-// Returns:
-//   - []BranchInfo: A slice of BranchInfo structs, each containing information about a remote branch.
-//   - error: An error if any step in the process fails, or nil if successful.
-//
-// Possible errors:
-//   - Failure to get the remote
-//   - Failure to list remote references
-//   - Failure to get commit information for a branch (logged as a warning, branch is skipped)
 func (w *RepoWatcher) getRemoteBranches() ([]BranchInfo, error) {
 	remote, err := w.repo.Remote("origin")
 	if err != nil {
@@ -240,6 +196,8 @@ func (w *RepoWatcher) getRemoteBranches() ([]BranchInfo, error) {
 	}
 
 	var branches []BranchInfo
+	updatedBranches := make(map[string]bool)
+
 	for _, ref := range refs {
 		if ref.Name().IsBranch() {
 			commit, err := w.repo.CommitObject(ref.Hash())
@@ -248,17 +206,127 @@ func (w *RepoWatcher) getRemoteBranches() ([]BranchInfo, error) {
 				continue
 			}
 
+			branchName := ref.Name().Short()
+			lastUpdate := commit.Author.When
+
 			branches = append(branches, BranchInfo{
-				Name:       ref.Name().Short(),
-				LastUpdate: commit.Author.When,
+				Name:       branchName,
+				LastUpdate: lastUpdate,
 			})
+
+			if oldTime, ok := w.branchLastUpdated[branchName]; !ok || lastUpdate.After(oldTime) {
+				w.logger.Info("Branch updated", zap.String("branch", branchName), zap.Time("updateTime", lastUpdate))
+				updatedBranches[branchName] = true
+			} else {
+				updatedBranches[branchName] = false
+			}
+			w.branchLastUpdated[branchName] = lastUpdate
 		}
 	}
 
-	// Sort branches by last update time, most recent first
 	sort.Slice(branches, func(i, j int) bool {
 		return branches[i].LastUpdate.After(branches[j].LastUpdate)
 	})
 
+	w.updatedBranches = updatedBranches
 	return branches, nil
+}
+
+func (w *RepoWatcher) updateBranchContents() error {
+	_, err := w.getRemoteBranches()
+	if err != nil {
+		return err
+	}
+
+	for branchName, updated := range w.updatedBranches {
+		if !updated {
+			continue
+		}
+		w.logger.Info("Updating branch contents", zap.String("branch", branchName))
+		contents, err := w.getBranchContents(branchName)
+		if err != nil {
+			w.logger.Error("Failed to get branch contents", zap.String("branch", branchName), zap.Error(err))
+			continue
+		}
+		w.branchContents[branchName] = contents
+	}
+
+	return nil
+}
+
+func (w *RepoWatcher) getBranchContents(branchName string) ([]byte, error) {
+	// Get the reference for the specified branch
+	branchRef := plumbing.ReferenceName("refs/heads/" + branchName)
+	ref, err := w.repo.Reference(branchRef, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get reference for branch %s: %w", branchName, err)
+	}
+
+	// Get the commit object for the branch
+	commit, err := w.repo.CommitObject(ref.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commit object for branch %s: %w", branchName, err)
+	}
+
+	// Get the tree for the commit
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tree for commit: %w", err)
+	}
+
+	// Create a buffer to store the gzipped tar archive
+	var buffer bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+
+	// Iterate through the tree and add files to the tar archive
+	err = tree.Files().ForEach(func(f *object.File) error {
+		contents, err := f.Contents()
+		if err != nil {
+			return fmt.Errorf("failed to get contents of file %s: %w", f.Name, err)
+		}
+
+		header := &tar.Header{
+			Name: f.Name,
+			Mode: 0644,
+			Size: int64(len(contents)),
+		}
+
+		if err := tarWriter.WriteHeader(header); err != nil {
+			return fmt.Errorf("failed to write tar header for %s: %w", f.Name, err)
+		}
+
+		if _, err := tarWriter.Write([]byte(contents)); err != nil {
+			return fmt.Errorf("failed to write file contents to tar for %s: %w", f.Name, err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate through files: %w", err)
+	}
+
+	// Close the tar and gzip writers
+	if err := tarWriter.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close tar writer: %w", err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close gzip writer: %w", err)
+	}
+
+	return buffer.Bytes(), nil
+}
+
+func (w *RepoWatcher) handleBranchContents(rw server.ResponseWriter, r *server.Request) {
+	branchName := r.PathValue("name")
+	contents, ok := w.branchContents[branchName]
+	if !ok {
+		server.Error(rw, "Branch not found", server.StatusNotFound)
+		return
+	}
+
+	rw.Header().Set("Content-Type", "application/gzip")
+	rw.Header().Set("Content-Encoding", "gzip")
+	rw.Write(contents)
 }
