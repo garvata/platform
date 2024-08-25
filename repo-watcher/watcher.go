@@ -71,9 +71,13 @@ func NewRepoWatcher(ctx context.Context, config *Config, logger *zap.Logger) (*R
 
 // Watch starts the repository watching process.
 // It periodically checks for updates and pulls changes from the remote repository.
-func (w *RepoWatcher) Watch(ctx context.Context) {
+func (w *RepoWatcher) Watch(ctx context.Context) error {
 	ticker := time.NewTicker(w.config.PollInterval)
 	defer ticker.Stop()
+
+	if err := w.checkAndPull(ctx); err != nil {
+		return fmt.Errorf("failed to check and pull repository: %w", err)
+	}
 
 	// Start the HTTP server
 	go w.startHTTPServer()
@@ -81,7 +85,7 @@ func (w *RepoWatcher) Watch(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			if err := w.checkAndPull(ctx); err != nil {
 				w.logger.Error("Failed to check and pull repository", zap.Error(err))
@@ -93,6 +97,9 @@ func (w *RepoWatcher) Watch(ctx context.Context) {
 // checkAndPull fetches and pulls the latest changes from the remote repository.
 func (w *RepoWatcher) checkAndPull(ctx context.Context) error {
 	w.logger.Info("Checking for updates")
+	if err := w.getRemoteBranches(); err != nil {
+		return fmt.Errorf("failed to get remote branches: %w", err)
+	}
 
 	// Fetch the latest changes from the remote repository
 	err := w.repo.FetchContext(ctx, &git.FetchOptions{
@@ -123,10 +130,6 @@ func (w *RepoWatcher) checkAndPull(ctx context.Context) error {
 		return fmt.Errorf("failed to pull repository: %w", err)
 	}
 
-	if err := w.updateBranchContents(); err != nil {
-		w.logger.Error("Failed to update branch contents", zap.Error(err))
-	}
-
 	w.logger.Info("Repository is up to date")
 	return nil
 }
@@ -135,8 +138,6 @@ type BranchInfo struct {
 	LastUpdate         time.Time `json:"last_update"`
 	LastUpdatedBy      string    `json:"last_updated_by"`
 	LastUpdatedByEmail string    `json:"last_updated_by_email"`
-	WasUpdated         bool      `json:"-"`
-	Contents           []byte    `json:"-"`
 }
 
 // startHTTPServer initializes and starts an HTTP server for the RepoWatcher.
@@ -144,11 +145,13 @@ type BranchInfo struct {
 //
 // The server provides the following endpoint:
 // - GET /branches: Returns information about all remote branches
-// - GET /branches/{name}: Returns the contents of a specific branch
+// - GET /branches/{name}: Returns the information about a specific branch
+// - GET /branches/{name}/contents: Returns the contents of a specific branch as a gzipped tar archive
 func (w *RepoWatcher) startHTTPServer() {
 	mux := server.NewServeMux()
 	mux.HandleFunc("GET /branches", w.handleBranches)
-	mux.HandleFunc("GET /branches/{name}", w.handleBranchContents)
+	mux.HandleFunc("GET /branches/{name}", w.handleBranches)
+	mux.HandleFunc("GET /branches/{name}/contents", w.handleBranchContents)
 
 	w.server = &server.Server{
 		Addr:    fmt.Sprintf("%s:%d", w.config.Host, w.config.Port),
@@ -164,14 +167,19 @@ func (w *RepoWatcher) startHTTPServer() {
 // handleBranches is an HTTP handler function that responds with information about all remote branches.
 // It retrieves the branch information using the getRemoteBranches method and returns it as JSON.
 func (w *RepoWatcher) handleBranches(rw server.ResponseWriter, r *server.Request) {
-	if err := w.getRemoteBranches(); err != nil {
-		w.logger.Error("Failed to get remote branches", zap.Error(err))
-		server.Error(rw, "Internal server error", server.StatusInternalServerError)
-		return
+	branchName := r.PathValue("name")
+	if branchName == "" {
+		rw.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(rw).Encode(w.branches)
+	} else {
+		branch, ok := w.branches[branchName]
+		if !ok {
+			server.Error(rw, "Branch not found", server.StatusNotFound)
+			return
+		}
+		rw.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(rw).Encode(branch)
 	}
-
-	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(w.branches)
 }
 
 // getRemoteBranches retrieves information about all remote branches for the repository.
@@ -208,40 +216,9 @@ func (w *RepoWatcher) getRemoteBranches() error {
 				LastUpdate:         lastUpdate,
 				LastUpdatedBy:      lastUpdatedBy,
 				LastUpdatedByEmail: lastUpdatedByEmail,
-				WasUpdated:         false,
-			}
-			if oldTime, ok := w.branches[branchName]; !ok || lastUpdate.After(oldTime.LastUpdate) {
-				w.logger.Info("Branch updated", zap.String("branch", branchName), zap.Time("updateTime", lastUpdate))
-				branch := w.branches[branchName]
-				branch.WasUpdated = true
-				w.branches[branchName] = branch
 			}
 		}
 	}
-	return nil
-}
-
-// updateBranchContents updates the contents of all branches that have been updated.
-func (w *RepoWatcher) updateBranchContents() error {
-	if err := w.getRemoteBranches(); err != nil {
-		return err
-	}
-
-	for branchName, branch := range w.branches {
-		if !branch.WasUpdated {
-			continue
-		}
-		w.logger.Info("Updating branch contents", zap.String("branch", branchName))
-		contents, err := w.getBranchContents(branchName)
-		if err != nil {
-			w.logger.Error("Failed to get branch contents", zap.String("branch", branchName), zap.Error(err))
-			continue
-		}
-		branch.Contents = contents
-		branch.WasUpdated = false
-		w.branches[branchName] = branch
-	}
-
 	return nil
 }
 
@@ -311,13 +288,14 @@ func (w *RepoWatcher) getBranchContents(branchName string) ([]byte, error) {
 
 func (w *RepoWatcher) handleBranchContents(rw server.ResponseWriter, r *server.Request) {
 	branchName := r.PathValue("name")
-	branch, ok := w.branches[branchName]
-	if !ok {
-		server.Error(rw, "Branch not found", server.StatusNotFound)
+	contents, err := w.getBranchContents(branchName)
+	if err != nil {
+		w.logger.Error("Failed to get branch contents", zap.String("branch", branchName), zap.Error(err))
+		server.Error(rw, "Internal server error", server.StatusInternalServerError)
 		return
 	}
 
 	rw.Header().Set("Content-Type", "application/gzip")
 	rw.Header().Set("Content-Encoding", "gzip")
-	rw.Write(branch.Contents)
+	rw.Write(contents)
 }
