@@ -17,6 +17,8 @@ type Config struct {
 	RepoURL      string
 	AuthToken    string
 	PollInterval time.Duration
+	Host         string
+	Port         int
 }
 
 var rootCmd = &cobra.Command{
@@ -36,6 +38,8 @@ It periodically checks the repository for new commits and can be configured with
 - Repository URL
 - Authentication token
 - Polling interval
+- Host for the HTTP server
+- Port for the HTTP server
 
 This tool is useful for automating workflows that depend on repository updates or for maintaining
 local copies of remote repositories in real-time.
@@ -55,9 +59,11 @@ func init() {
 	rootCmd.Flags().StringVar(&config.RepoURL, "repo-url", "", "URL of the repository")
 	rootCmd.Flags().StringVar(&config.AuthToken, "auth-token", "", "auth token for authentication")
 	rootCmd.Flags().DurationVar(&config.PollInterval, "poll-interval", 5*time.Minute, "Interval to poll for changes")
+	rootCmd.Flags().StringVar(&config.Host, "host", "localhost", "Host for the HTTP server")
+	rootCmd.Flags().IntVar(&config.Port, "port", 8080, "Port for the HTTP server")
 
 	rootCmd.MarkFlagRequired("repo-url")
-	rootCmd.MarkFlagRequired("api-token")
+	rootCmd.MarkFlagRequired("auth-token")
 }
 
 func run(cmd *cobra.Command, args []string) {

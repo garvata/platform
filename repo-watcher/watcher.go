@@ -154,11 +154,11 @@ func (w *RepoWatcher) startHTTPServer() {
 	mux.HandleFunc("GET /branches/{name}", w.handleBranchContents)
 
 	w.server = &server.Server{
-		Addr:    ":8080",
+		Addr:    fmt.Sprintf("%s:%d", w.config.Host, w.config.Port),
 		Handler: mux,
 	}
 
-	w.logger.Info("Starting HTTP server on :8080")
+	w.logger.Info("Starting HTTP server", zap.String("host", w.config.Host), zap.Int("port", w.config.Port))
 	if err := w.server.ListenAndServe(); err != nil && err != server.ErrServerClosed {
 		w.logger.Error("HTTP server error", zap.Error(err))
 	}
