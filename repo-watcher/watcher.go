@@ -141,7 +141,7 @@ type BranchInfo struct {
 //
 // The server provides the following endpoint:
 // - GET /branches: Returns information about all remote branches
-// - GET /branch/{name}: Returns the contents of a specific branch
+// - GET /branches/{name}: Returns the contents of a specific branch
 func (w *RepoWatcher) startHTTPServer() {
 	mux := server.NewServeMux()
 	mux.HandleFunc("GET /branches", w.handleBranches)
