@@ -1,0 +1,3 @@
+[submodule "model-registry"]
+	path = model-registry
+	url = git@github.com:kubeflow/model-registry.git
