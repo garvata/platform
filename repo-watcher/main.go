@@ -98,9 +98,7 @@ func run(cmd *cobra.Command, args []string) {
 	}
 
 	// Start watching the repository
-	if err := watcher.Watch(ctx); err != nil {
-		logger.Fatal("Error while watching repository", zap.Error(err))
-	}
+	watcher.Watch(ctx)
 }
 
 func main() {

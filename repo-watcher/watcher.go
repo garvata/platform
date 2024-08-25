@@ -70,7 +70,7 @@ func NewRepoWatcher(ctx context.Context, config *Config, logger *zap.Logger) (*R
 
 // Watch starts the repository watching process.
 // It periodically checks for updates and pulls changes from the remote repository.
-func (w *RepoWatcher) Watch(ctx context.Context) error {
+func (w *RepoWatcher) Watch(ctx context.Context) {
 	ticker := time.NewTicker(w.config.PollInterval)
 	defer ticker.Stop()
 
@@ -80,7 +80,7 @@ func (w *RepoWatcher) Watch(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return
 		case <-ticker.C:
 			if err := w.checkAndPull(ctx); err != nil {
 				w.logger.Error("Failed to check and pull repository", zap.Error(err))
@@ -131,9 +131,11 @@ func (w *RepoWatcher) checkAndPull(ctx context.Context) error {
 }
 
 type BranchInfo struct {
-	LastUpdate time.Time `json:"last_update"`
-	WasUpdated bool      `json:"-"`
-	Contents   []byte    `json:"-"`
+	LastUpdate         time.Time `json:"last_update"`
+	LastUpdatedBy      string    `json:"last_updated_by"`
+	LastUpdatedByEmail string    `json:"last_updated_by_email"`
+	WasUpdated         bool      `json:"-"`
+	Contents           []byte    `json:"-"`
 }
 
 // startHTTPServer initializes and starts an HTTP server for the RepoWatcher.
@@ -198,15 +200,20 @@ func (w *RepoWatcher) getRemoteBranches() error {
 
 			branchName := ref.Name().Short()
 			lastUpdate := commit.Author.When
+			lastUpdatedBy := commit.Author.Name
+			lastUpdatedByEmail := commit.Author.Email
 
+			w.branches[branchName] = BranchInfo{
+				LastUpdate:         lastUpdate,
+				LastUpdatedBy:      lastUpdatedBy,
+				LastUpdatedByEmail: lastUpdatedByEmail,
+				WasUpdated:         false,
+			}
 			if oldTime, ok := w.branches[branchName]; !ok || lastUpdate.After(oldTime.LastUpdate) {
 				w.logger.Info("Branch updated", zap.String("branch", branchName), zap.Time("updateTime", lastUpdate))
 				branch := w.branches[branchName]
-				branch.LastUpdate = lastUpdate
 				branch.WasUpdated = true
 				w.branches[branchName] = branch
-			} else {
-				w.branches[branchName] = BranchInfo{LastUpdate: lastUpdate, WasUpdated: false}
 			}
 		}
 	}
