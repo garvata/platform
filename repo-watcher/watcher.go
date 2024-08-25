@@ -6,10 +6,14 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	server "net/http"
 	"time"
 
+	server "net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -88,6 +92,9 @@ func (w *RepoWatcher) Watch(ctx context.Context) error {
 			return nil
 		case <-ticker.C:
 			if err := w.checkAndPull(ctx); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil
+				}
 				w.logger.Error("Failed to check and pull repository", zap.Error(err))
 			}
 		}
@@ -148,14 +155,37 @@ type BranchInfo struct {
 // - GET /branches/{name}: Returns the information about a specific branch
 // - GET /branches/{name}/contents: Returns the contents of a specific branch as a gzipped tar archive
 func (w *RepoWatcher) startHTTPServer() {
-	mux := server.NewServeMux()
-	mux.HandleFunc("GET /branches", w.handleBranches)
-	mux.HandleFunc("GET /branches/{name}", w.handleBranches)
-	mux.HandleFunc("GET /branches/{name}/contents", w.handleBranchContents)
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(30 * time.Second))
+
+	// Use zap logger middleware
+	r.Use(func(next server.Handler) server.Handler {
+		return server.HandlerFunc(func(_w server.ResponseWriter, r *server.Request) {
+			ww := middleware.NewWrapResponseWriter(_w, r.ProtoMajor)
+			start := time.Now()
+			defer func() {
+				w.logger.Info("Request completed",
+					zap.String("method", r.Method),
+					zap.String("path", r.URL.Path),
+					zap.Duration("duration", time.Since(start)),
+					zap.Int("status", ww.Status()),
+					zap.Int("size", ww.BytesWritten()),
+				)
+			}()
+			next.ServeHTTP(ww, r)
+		})
+	})
+
+	r.Get("/branches", w.handleBranches)
+	r.Get("/branches/{name}", w.handleBranch)
+	r.Get("/branches/{name}/contents", w.handleBranchContents)
 
 	w.server = &server.Server{
 		Addr:    fmt.Sprintf("%s:%d", w.config.Host, w.config.Port),
-		Handler: mux,
+		Handler: r,
 	}
 
 	w.logger.Info("Starting HTTP server", zap.String("host", w.config.Host), zap.Int("port", w.config.Port))
@@ -167,19 +197,21 @@ func (w *RepoWatcher) startHTTPServer() {
 // handleBranches is an HTTP handler function that responds with information about all remote branches.
 // It retrieves the branch information using the getRemoteBranches method and returns it as JSON.
 func (w *RepoWatcher) handleBranches(rw server.ResponseWriter, r *server.Request) {
+	rw.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(rw).Encode(w.branches)
+}
+
+// handleBranch is an HTTP handler function that responds with information about a specific branch.
+// It retrieves the branch information from the branches map and returns it as JSON.
+func (w *RepoWatcher) handleBranch(rw server.ResponseWriter, r *server.Request) {
 	branchName := r.PathValue("name")
-	if branchName == "" {
-		rw.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(rw).Encode(w.branches)
-	} else {
-		branch, ok := w.branches[branchName]
-		if !ok {
-			server.Error(rw, "Branch not found", server.StatusNotFound)
-			return
-		}
-		rw.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(rw).Encode(branch)
+	branch, ok := w.branches[branchName]
+	if !ok {
+		server.Error(rw, "Branch not found", server.StatusNotFound)
+		return
 	}
+	rw.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(rw).Encode(branch)
 }
 
 // getRemoteBranches retrieves information about all remote branches for the repository.
