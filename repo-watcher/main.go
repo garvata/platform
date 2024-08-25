@@ -27,7 +27,15 @@ type Config struct {
 var rootCmd = &cobra.Command{
 	Use:   "repo-watcher",
 	Short: "A tool to watch a Git repository for changes",
-	Long: `repo-watcher is a command-line tool designed to monitor a specified Git repository for changes.
+	Long: `
+ ____                  __        __    _       _
+|  _ \ ___ _ __   ___ / _|_      / /_ _| |_ ___| |__   ___ _ __
+| |_) / _ \ '_ \ / _ \ |_\ \ /\ / / _' | __/ __| '_ \ / _ \ '__|
+|  _ <  __/ |_) | (_) |  _|\ V  V / (_| | || (__| | | |  __/ |
+|_| \_\___| .__/ \___/_|   \_/\_/ \__,_|\__\___|_| |_|\___|_|
+          |_|
+
+repo-watcher is a command-line tool designed to monitor a specified Git repository for changes.
 It periodically checks the repository for new commits and can be configured with various options such as:
 - Repository name and URL
 - API token for authentication
