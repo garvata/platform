@@ -17,7 +17,6 @@ type Config struct {
 	RepoName     string
 	RepoURL      string
 	APIToken     string
-	RepoBranch   string
 	PollInterval time.Duration
 }
 
@@ -50,7 +49,6 @@ func init() {
 	rootCmd.Flags().StringVar(&config.RepoName, "repo-name", "", "Name of the repository")
 	rootCmd.Flags().StringVar(&config.RepoURL, "repo-url", "", "URL of the repository")
 	rootCmd.Flags().StringVar(&config.APIToken, "api-token", "", "API token for authentication")
-	rootCmd.Flags().StringVar(&config.RepoBranch, "repo-branch", "main", "Branch to watch")
 	rootCmd.Flags().DurationVar(&config.PollInterval, "poll-interval", 5*time.Minute, "Interval to poll for changes")
 
 	rootCmd.MarkFlagRequired("repo-name")
