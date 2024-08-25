@@ -14,9 +14,8 @@ import (
 )
 
 type Config struct {
-	RepoName     string
 	RepoURL      string
-	APIToken     string
+	AuthToken    string
 	PollInterval time.Duration
 }
 
@@ -46,12 +45,10 @@ local copies of remote repositories in real-time.`,
 var config Config
 
 func init() {
-	rootCmd.Flags().StringVar(&config.RepoName, "repo-name", "", "Name of the repository")
 	rootCmd.Flags().StringVar(&config.RepoURL, "repo-url", "", "URL of the repository")
-	rootCmd.Flags().StringVar(&config.APIToken, "api-token", "", "API token for authentication")
+	rootCmd.Flags().StringVar(&config.AuthToken, "auth-token", "", "auth token for authentication")
 	rootCmd.Flags().DurationVar(&config.PollInterval, "poll-interval", 5*time.Minute, "Interval to poll for changes")
 
-	rootCmd.MarkFlagRequired("repo-name")
 	rootCmd.MarkFlagRequired("repo-url")
 	rootCmd.MarkFlagRequired("api-token")
 }

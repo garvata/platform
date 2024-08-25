@@ -6,6 +6,7 @@ import (
 	"fmt"
 	server "net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -40,13 +41,17 @@ type RepoWatcher struct {
 //   - An error if the repository cloning fails or any other initialization error occurs.
 func NewRepoWatcher(config *Config, logger *zap.Logger) (*RepoWatcher, error) {
 	// Clone the repository with the provided configuration
-	repo, err := git.PlainClone(config.RepoName, false, &git.CloneOptions{
+	// Extract repo name from URL
+	repoName := extractRepoName(config.RepoURL)
+
+	repo, err := git.PlainClone(repoName, false, &git.CloneOptions{
 		URL: config.RepoURL,
 		Auth: &http.BasicAuth{
 			Username: "token",
-			Password: config.APIToken,
+			Password: config.AuthToken,
 		},
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone repository: %w", err)
 	}
@@ -57,6 +62,15 @@ func NewRepoWatcher(config *Config, logger *zap.Logger) (*RepoWatcher, error) {
 		logger: logger,
 		repo:   repo,
 	}, nil
+}
+
+// Helper function to extract repo name from URL
+func extractRepoName(url string) string {
+	parts := strings.Split(url, "/")
+	if len(parts) > 0 {
+		return strings.TrimSuffix(parts[len(parts)-1], ".git")
+	}
+	return ""
 }
 
 // Watch starts the repository watching process.
@@ -105,7 +119,7 @@ func (w *RepoWatcher) checkAndPull() error {
 	err := w.repo.Fetch(&git.FetchOptions{
 		Auth: &http.BasicAuth{
 			Username: "token",
-			Password: w.config.APIToken,
+			Password: w.config.AuthToken,
 		},
 	})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
@@ -122,7 +136,7 @@ func (w *RepoWatcher) checkAndPull() error {
 	err = worktree.Pull(&git.PullOptions{
 		Auth: &http.BasicAuth{
 			Username: "token",
-			Password: w.config.APIToken,
+			Password: w.config.AuthToken,
 		},
 		RemoteName: "origin",
 	})
@@ -218,7 +232,7 @@ func (w *RepoWatcher) getRemoteBranches() ([]BranchInfo, error) {
 	refs, err := remote.List(&git.ListOptions{
 		Auth: &http.BasicAuth{
 			Username: "token",
-			Password: w.config.APIToken,
+			Password: w.config.AuthToken,
 		},
 	})
 	if err != nil {
