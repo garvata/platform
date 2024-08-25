@@ -36,6 +36,7 @@ type RepoWatcher struct {
 	// server is the HTTP server for exposing branch information
 	server *server.Server
 
+	// branches is a map of branch names to their information.
 	branches map[string]BranchInfo
 }
 
@@ -220,6 +221,7 @@ func (w *RepoWatcher) getRemoteBranches() error {
 	return nil
 }
 
+// updateBranchContents updates the contents of all branches that have been updated.
 func (w *RepoWatcher) updateBranchContents() error {
 	if err := w.getRemoteBranches(); err != nil {
 		return err
@@ -243,6 +245,7 @@ func (w *RepoWatcher) updateBranchContents() error {
 	return nil
 }
 
+// getBranchContents retrieves the contents of a specific branch as a gzipped tar archive.
 func (w *RepoWatcher) getBranchContents(branchName string) ([]byte, error) {
 	// Get the reference for the specified branch
 	branchRef := plumbing.ReferenceName("refs/heads/" + branchName)
@@ -296,7 +299,6 @@ func (w *RepoWatcher) getBranchContents(branchName string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to iterate through files: %w", err)
 	}
 
-	// Close the tar and gzip writers
 	if err := tarWriter.Close(); err != nil {
 		return nil, fmt.Errorf("failed to close tar writer: %w", err)
 	}
