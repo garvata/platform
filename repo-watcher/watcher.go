@@ -42,9 +42,10 @@ type RepoWatcher struct {
 }
 
 type BranchInfo struct {
-	LastUpdate         time.Time `json:"last_update"`
-	LastUpdatedBy      string    `json:"last_updated_by"`
-	LastUpdatedByEmail string    `json:"last_updated_by_email"`
+	LastUpdate         time.Time     `json:"last_update"`
+	LastUpdatedBy      string        `json:"last_updated_by"`
+	LastUpdatedByEmail string        `json:"last_updated_by_email"`
+	Config             *RunnerConfig `json:"config"`
 }
 
 // NewRepoWatcher creates and initializes a new RepoWatcher instance.
@@ -62,7 +63,6 @@ func NewRepoWatcher(ctx context.Context, config *Config, logger *zap.Logger) (*R
 		Depth:  1,
 		Mirror: true,
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone repository: %w", err)
 	}
@@ -107,10 +107,6 @@ func (w *RepoWatcher) Watch(ctx context.Context) error {
 // checkAndPull fetches and pulls the latest changes from the remote repository.
 func (w *RepoWatcher) checkAndPull(ctx context.Context) error {
 	w.logger.Info("Checking for updates")
-	if err := w.getRemoteBranches(); err != nil {
-		return fmt.Errorf("failed to get remote branches: %w", err)
-	}
-
 	// Fetch the latest changes from the remote repository
 	err := w.repo.FetchContext(ctx, &git.FetchOptions{
 		Auth: &http.BasicAuth{
@@ -120,6 +116,9 @@ func (w *RepoWatcher) checkAndPull(ctx context.Context) error {
 	})
 	if err != nil && err != git.NoErrAlreadyUpToDate {
 		return fmt.Errorf("failed to fetch repository: %w", err)
+	}
+	if err := w.getRemoteBranches(); err != nil {
+		return fmt.Errorf("failed to get remote branches: %w", err)
 	}
 
 	// Get the worktree for the local repository
@@ -170,18 +169,65 @@ func (w *RepoWatcher) getRemoteBranches() error {
 			}
 
 			branchName := ref.Name().Short()
+			_, ok := w.branches[branchName]
+			if !ok {
+				w.logger.Info("new branch", zap.String("branch", branchName))
+			}
 			lastUpdate := commit.Author.When
 			lastUpdatedBy := commit.Author.Name
 			lastUpdatedByEmail := commit.Author.Email
+			runnerConfig, err := w.getBranchConfig(branchName)
+			if err != nil {
+				w.logger.Warn("invalid runner config", zap.String("branch", branchName), zap.Error(err))
+			}
 
 			w.branches[branchName] = BranchInfo{
 				LastUpdate:         lastUpdate,
 				LastUpdatedBy:      lastUpdatedBy,
 				LastUpdatedByEmail: lastUpdatedByEmail,
+				Config:             runnerConfig,
 			}
 		}
 	}
 	return nil
+}
+
+func (w *RepoWatcher) getBranchConfig(branchName string) (*RunnerConfig, error) {
+	// Get the reference for the specified branch
+	branchRef := plumbing.ReferenceName("refs/heads/" + branchName)
+	ref, err := w.repo.Reference(branchRef, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get reference for branch %s: %w", branchName, err)
+	}
+
+	// Get the commit object for the branch
+	commit, err := w.repo.CommitObject(ref.Hash())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commit object for branch %s: %w", branchName, err)
+	}
+
+	// Get the tree for the commit
+	tree, err := commit.Tree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tree for commit: %w", err)
+	}
+
+	var config *RunnerConfig
+	err = tree.Files().ForEach(func(f *object.File) error {
+		if f.Name == ".garvata.yaml" || f.Name == ".garvata.yml" {
+			contents, err := f.Contents()
+			if err != nil {
+				return err
+			}
+			config, err = ParseRunnerConfig([]byte(contents), "", branchName)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
+		return nil
+	})
+	return config, err
 }
 
 // getBranchContents retrieves the contents of a specific branch as a gzipped tar archive.
@@ -233,7 +279,6 @@ func (w *RepoWatcher) getBranchContents(branchName string) ([]byte, error) {
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to iterate through files: %w", err)
 	}

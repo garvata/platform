@@ -58,7 +58,6 @@ type ModelTrain struct {
 	Requirements     []string     `yaml:"requirements" json:"requirements"`
 	RequirementsFile string       `yaml:"requirements_file" json:"requirements_file"`
 	Specs            Specs        `yaml:"specs" json:"specs"`
-	Db               Database     `yaml:"db" json:"db"`
 	TrainParams      []InputParam `yaml:"train_params" json:"train_params"`
 }
 
