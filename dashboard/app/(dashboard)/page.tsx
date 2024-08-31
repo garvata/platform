@@ -5,32 +5,31 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels"
 import { Experiment, ExperimentList } from "@/components/experiment-list"
 import ExperimentConfig from "@/components/experiment-config"
 import { Button } from "@/components/ui/button"
+import { useToast } from "@/hooks/use-toast"
 
 export default function DashboardPage() {
     const [selectedExperiment, setSelectedExperiment] = useState<Experiment | null>(null)
-    const [isTraining, setIsTraining] = useState<boolean>(false)
-    const [trainError, setTrainError] = useState<Error | null>(null)
-
+    const { toast } = useToast()
     const handleTrainModel = async () => {
         if (selectedExperiment == null) return
-        setIsTraining(true)
-        setTrainError(null)
         try {
-            const response = await fetch('/api/train-model', {
+            const response = await fetch('/api/schedule-experiment', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ experimentId: selectedExperiment.id }),
             })
             const data = await response.json()
-            if (!response.ok) throw new Error(data.error || 'Failed to train model')
-            // Handle successful response
-            console.log(data.message)
-            // You might want to update the experiment status here
+            if (!response.ok) throw new Error(data.error || 'Failed to schedule experiment')
+            toast({
+                title: 'Experiment scheduled',
+                description: 'The experiment has been scheduled successfully',
+            })
         } catch (error) {
-            console.error('Error training model:', error)
-            setTrainError(error as Error)
-        } finally {
-            setIsTraining(false)
+            console.error('Error scheduling experiment:', error)
+            toast({
+                title: 'Error scheduling experiment',
+                description: 'An error occurred while scheduling the experiment',
+            })
         }
     }
 
@@ -51,17 +50,18 @@ export default function DashboardPage() {
                 <PanelResizeHandle className="w-1 mx-2 bg-gray-400 transition-colors" />
                 <Panel minSize={50} defaultSize={80}>
                     <div className="flex flex-col h-full">
-                        <Button
-                            onClick={handleTrainModel}
-                            className="bg-blue-500 text-white px-4 py-2 rounded mb-4 disabled:bg-gray-400"
-                            disabled={!selectedExperiment || isTraining}
-                        >
-                            {isTraining ? 'Training...' : 'Train Model'}
-                        </Button>
-                        {trainError && (
-                            <p className="text-red-500 mb-4">{trainError.message}</p>
-                        )}
-                        <ExperimentConfig experiment={selectedExperiment} />
+                        <div className="flex flex-row justify-between items-start w-full">
+                            <Button
+                                variant={"default"}
+                                onClick={handleTrainModel}
+                                disabled={!selectedExperiment}
+                            >
+                                Train Model
+                            </Button>
+                        </div>
+                        <div className="m-2 flex-grow">
+                            <ExperimentConfig experiment={selectedExperiment} />
+                        </div>
                     </div>
                 </Panel>
             </PanelGroup>

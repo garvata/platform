@@ -12,7 +12,6 @@ const ExperimentConfig: React.FC<ExperimentConfigProps> = ({ experiment }) => {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4">Experiment Configuration</h2>
       <div className="space-y-2">
         <p><strong>ID:</strong> {experiment.id}</p>
         <p><strong>Name:</strong> {experiment.name}</p>
