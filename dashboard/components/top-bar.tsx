@@ -1,4 +1,4 @@
-import { addProject } from "@/app/(dashboard)/actions"
+import { addProject } from "@/app/(dashboard)/experiments/actions"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
