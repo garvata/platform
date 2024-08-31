@@ -1,9 +1,10 @@
 "use client"
 
-import { useState } from "react"
 import LeftNavBar from "@/components/left-nav"
-import UpgradeCard from "@/components/upgrade-card"
 import TopBar from "@/components/top-bar"
+import UpgradeCard from "@/components/upgrade-card"
+import { useEffect, useState } from "react"
+
 
 export default function DashboardLayout({
     children,
@@ -11,6 +12,16 @@ export default function DashboardLayout({
     children: React.ReactNode
 }) {
     const [selectedProject, setSelectedProject] = useState<string | null>(null)
+    const [projects, setProjects] = useState<string[]>([])
+
+    useEffect(() => {
+        const fetchProjects = async () => {
+            const response = await fetch('/api/get-projects')
+            const data = await response.json()
+            setProjects(data)
+        }
+        fetchProjects()
+    }, [])
 
     return (
         <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
@@ -26,7 +37,7 @@ export default function DashboardLayout({
                 <TopBar
                     selectedProject={selectedProject}
                     setSelectedProject={setSelectedProject}
-                    projects={["Project 1", "Project 2", "Project 3"]}
+                    projects={projects}
                 />
                 {children}
             </div>
