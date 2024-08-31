@@ -3,25 +3,29 @@
 import LeftNavBar from "@/components/left-nav"
 import TopBar from "@/components/top-bar"
 import UpgradeCard from "@/components/upgrade-card"
+import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
+import { Project } from "@/lib/models"
 
+import useSWR from 'swr'
+import { fetcher } from "@/lib/utils"
 
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode
 }) {
-    const [selectedProject, setSelectedProject] = useState<string | null>(null)
-    const [projects, setProjects] = useState<string[]>([])
+    const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+    const router = useRouter()
+    const { data: projects = [] } = useSWR<Project[]>('/api/projects', fetcher)
 
     useEffect(() => {
-        const fetchProjects = async () => {
-            const response = await fetch('/api/get-projects')
-            const data = await response.json()
-            setProjects(data)
+        if (selectedProject) {
+            router.push(`?project=${selectedProject.id}`, { scroll: false })
+        } else {
+            router.push(`?project=`, { scroll: false })
         }
-        fetchProjects()
-    }, [])
+    }, [router, selectedProject])
 
     return (
         <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">

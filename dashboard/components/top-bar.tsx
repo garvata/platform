@@ -24,11 +24,12 @@ import { Bell, ChevronDown, CircleUser, FolderOpenDot, Plus } from "lucide-react
 import { useRouter } from 'next/navigation'
 import { useEffect } from "react"
 import { useFormState } from "react-dom"
+import { Project } from "@/lib/models"
 
 interface TopBarProps {
-    selectedProject: string | null;
-    setSelectedProject: (project: string) => void;
-    projects: string[];
+    selectedProject: Project | null;
+    setSelectedProject: (project: Project) => void;
+    projects: Project[];
 }
 
 
@@ -57,7 +58,7 @@ export default function TopBar({ selectedProject, setSelectedProject, projects }
                     <Button variant="ghost" className=" justify-between">
                         <div className="flex items-center gap-3">
                             <FolderOpenDot className="h-4 w-4" />
-                            {selectedProject || "Select Project"}
+                            {selectedProject?.name || "Select Project"}
                         </div>
                         <ChevronDown className="h-4 w-4" />
                     </Button>
@@ -65,8 +66,8 @@ export default function TopBar({ selectedProject, setSelectedProject, projects }
                 <DropdownMenuContent>
                     {
                         projects.map((project) => (
-                            <DropdownMenuItem key={project} onClick={() => setSelectedProject(project)}>
-                                {project}
+                            <DropdownMenuItem key={project.id} onClick={() => setSelectedProject(project)}>
+                                {project.name}
                             </DropdownMenuItem>
                         ))
                     }

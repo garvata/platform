@@ -1,5 +1,5 @@
 import React from 'react';
-import { Experiment } from './experiment-list';
+import { Experiment } from '@/lib/models';
 
 interface ExperimentConfigProps {
   experiment: Experiment | null;

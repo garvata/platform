@@ -1,11 +1,6 @@
+import { Experiment } from '@/lib/models';
 import React from 'react';
-import { Card, CardHeader, CardTitle, CardDescription } from './ui/card';
-
-export interface Experiment {
-  id: string;
-  name: string;
-  description: string;
-}
+import { Card, CardDescription, CardHeader, CardTitle } from './ui/card';
 
 interface ExperimentListProps {
   onSelectExperiment: (experiment: Experiment | null) => void;

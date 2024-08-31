@@ -1,25 +1,53 @@
 "use client"
 
-import { useState } from "react"
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels"
-import { Experiment, ExperimentList } from "@/components/experiment-list"
 import ExperimentConfig from "@/components/experiment-config"
+import { ExperimentList } from "@/components/experiment-list"
+import { SkeletonCard } from "@/components/skeleton-card"
 import { Button } from "@/components/ui/button"
+import {
+    ResizableHandle,
+    ResizablePanel,
+    ResizablePanelGroup,
+} from "@/components/ui/resizable"
 import { useToast } from "@/hooks/use-toast"
+import { Experiment } from "@/lib/models"
+import { fetcher } from "@/lib/utils"
+import { useSearchParams } from 'next/navigation'
+import { useEffect, useState } from "react"
+import useSWR, { useSWRConfig } from 'swr'
+import useSWRMutation from 'swr/mutation'
+
+async function scheduleExperiment(url: string, { arg }: { arg: { experimentId: string } }) {
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(arg),
+    })
+    if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to schedule experiment')
+    }
+    return response.json()
+}
 
 export default function DashboardPage() {
+    const searchParams = useSearchParams()
+    const projectId = searchParams.get('project')
     const [selectedExperiment, setSelectedExperiment] = useState<Experiment | null>(null)
+
+    useEffect(() => { setSelectedExperiment(null) }, [projectId])
+
+    const { data: experiments = [], error, isLoading } = useSWR<Experiment[]>(
+        projectId ? `/api/experiments?id=${projectId}` : null,
+        fetcher
+    )
+    const { trigger: scheduleExperimentTrigger, isMutating } = useSWRMutation('/api/schedule-experiment', scheduleExperiment)
     const { toast } = useToast()
+
     const handleTrainModel = async () => {
         if (selectedExperiment == null) return
         try {
-            const response = await fetch('/api/schedule-experiment', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ experimentId: selectedExperiment.id }),
-            })
-            const data = await response.json()
-            if (!response.ok) throw new Error(data.error || 'Failed to schedule experiment')
+            await scheduleExperimentTrigger({ experimentId: selectedExperiment.id })
             toast({
                 title: 'Experiment scheduled',
                 description: 'The experiment has been scheduled successfully',
@@ -34,37 +62,41 @@ export default function DashboardPage() {
     }
 
     return (
-        <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6">
-            <PanelGroup direction="horizontal">
-                <Panel defaultSize={20} minSize={20}>
-                    <ExperimentList
-                        onSelectExperiment={setSelectedExperiment}
-                        selectedExperiment={selectedExperiment}
-                        experiments={[
-                            { id: '1', name: 'Experiment 1', description: 'Description 1' },
-                            { id: '2', name: 'Experiment 2', description: 'Description 2' },
-                            { id: '3', name: 'Experiment 3', description: 'Description 3' },
-                        ]}
-                    />
-                </Panel>
-                <PanelResizeHandle className="w-1 mx-2 bg-gray-400 transition-colors" />
-                <Panel minSize={50} defaultSize={80}>
+        <main className="flex flex-1 flex-col">
+            <ResizablePanelGroup direction="horizontal">
+                <ResizablePanel defaultSize={20} minSize={20} className="p-2">
+                    {isLoading ? (
+                        <SkeletonCard />
+                    ) : error ? (
+                        <div className="text-red-500 p-4">
+                            Error loading experiments: {error.message}
+                        </div>
+                    ) : (
+                        <ExperimentList
+                            onSelectExperiment={setSelectedExperiment}
+                            selectedExperiment={selectedExperiment}
+                            experiments={experiments}
+                        />
+                    )}
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+                <ResizablePanel defaultSize={80} minSize={60} className="p-2">
                     <div className="flex flex-col h-full">
                         <div className="flex flex-row justify-between items-start w-full">
                             <Button
                                 variant={"default"}
                                 onClick={handleTrainModel}
-                                disabled={!selectedExperiment}
+                                disabled={!selectedExperiment || isMutating || isLoading}
                             >
-                                Train Model
+                                {isMutating ? 'Scheduling...' : 'Train Model'}
                             </Button>
                         </div>
                         <div className="m-2 flex-grow">
                             <ExperimentConfig experiment={selectedExperiment} />
                         </div>
                     </div>
-                </Panel>
-            </PanelGroup>
+                </ResizablePanel>
+            </ResizablePanelGroup>
         </main>
     )
 }
