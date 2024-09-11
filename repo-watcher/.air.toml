@@ -3,14 +3,7 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-args_bin = [
-    "--auth-token",
-    "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",
-    "--repo-url",
-    "https://github.com/guptap504/garvata-test",
-    "--poll-interval",
-    "30s",
-]
+args_bin = []
 bin = "./tmp/main"
 cmd = "go build -o ./tmp/main ."
 delay = 1000
