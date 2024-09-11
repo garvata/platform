@@ -13,8 +13,8 @@ import { useToast } from "@/hooks/use-toast"
 import { Experiment } from "@/lib/models"
 import { fetcher } from "@/lib/utils"
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useState } from "react"
-import useSWR, { useSWRConfig } from 'swr'
+import { Suspense, useEffect, useState } from "react"
+import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
 
 async function scheduleExperiment(url: string, { arg }: { arg: { experimentId: string } }) {
@@ -22,6 +22,7 @@ async function scheduleExperiment(url: string, { arg }: { arg: { experimentId: s
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(arg),
+        next: { revalidate: 5 },
     })
     if (!response.ok) {
         const data = await response.json()
@@ -30,7 +31,7 @@ async function scheduleExperiment(url: string, { arg }: { arg: { experimentId: s
     return response.json()
 }
 
-export default function ExperimentsPage() {
+function Experiments() {
     const searchParams = useSearchParams()
     const projectId = searchParams.get('project')
     const [selectedExperiment, setSelectedExperiment] = useState<Experiment | null>(null)
@@ -98,5 +99,13 @@ export default function ExperimentsPage() {
                 </ResizablePanel>
             </ResizablePanelGroup>
         </main>
+    )
+}
+
+export default function ExperimentsPage() {
+    return (
+        <Suspense>
+            <Experiments />
+        </Suspense>
     )
 }
