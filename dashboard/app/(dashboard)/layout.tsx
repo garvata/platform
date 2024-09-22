@@ -1,16 +1,34 @@
 "use client"
 
-import LeftNavBar from "@/components/left-nav"
+import { LeftNavBar } from "@/components/left-nav"
 import TopBar from "@/components/top-bar"
-import UpgradeCard from "@/components/upgrade-card"
+import { Project } from "@/lib/models"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Suspense, useEffect, useState } from "react"
-import { Project } from "@/lib/models"
 
-import useSWR from 'swr'
 import { fetcher } from "@/lib/utils"
-import { ChevronLeft, ChevronRight } from "lucide-react" // Import icons
+import useSWR from 'swr'
 
+const useCheckMobileScreen = () => {
+    const [width, setWidth] = useState<number | null>(null);
+    const handleWindowSizeChange = () => {
+        if (typeof window !== 'undefined') {
+            setWidth(window.innerWidth);
+        }
+    }
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setWidth(window.innerWidth);
+            window.addEventListener('resize', handleWindowSizeChange);
+            return () => {
+                window.removeEventListener('resize', handleWindowSizeChange);
+            }
+        }
+    }, []);
+
+    return width !== null ? width <= 768 : false;
+}
 
 function Layout({
     children,
@@ -30,32 +48,26 @@ function Layout({
             router.push(`?project=`, { scroll: false })
         }
     }, [router, selectedProject, searchParams])
-
+    const isMobile = useCheckMobileScreen()
     return (
-        <div className={`grid min-h-screen w-full ${isNavCollapsed ? 'md:grid-cols-[60px_1fr]' : 'md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]'}`}>
-            <div className={`hidden border-r bg-muted/40 md:flex md:flex-col ${isNavCollapsed ? 'items-center' : ''}`}>
-                <div className="flex h-full max-h-screen flex-col gap-2 w-full">
+        <div className="flex flex-row w-full">
+            {!isMobile &&
+                <div className={`hidden border-r bg-muted/40 md:flex md:flex-col`}>
                     <LeftNavBar setSelectedProject={setSelectedProject} isCollapsed={isNavCollapsed} />
-                    {!isNavCollapsed && (
-                        <div className="mt-auto p-4">
-                            <UpgradeCard />
-                        </div>
-                    )}
-                    <button
-                        onClick={() => setIsNavCollapsed(!isNavCollapsed)}
-                        className="p-2 mt-auto mb-4 mx-auto hover:bg-muted/60 rounded-full"
-                    >
-                        {isNavCollapsed ? <ChevronRight size={16} /> : <div className="flex items-right gap-2"><ChevronLeft size={16} /> <span className="text-sm font-medium">Collapse</span></div>}
-                    </button>
                 </div>
-            </div>
-            <div className="flex flex-col">
+            }
+            <div className="flex flex-col flex-grow">
                 <TopBar
                     selectedProject={selectedProject}
                     setSelectedProject={setSelectedProject}
                     projects={projects}
+                    isCollapsed={isNavCollapsed}
+                    setIsCollapsed={setIsNavCollapsed}
+                    isMobile={isMobile}
                 />
-                {children}
+                <div className="flex-grow">
+                    {children}
+                </div>
             </div>
         </div>
     )
