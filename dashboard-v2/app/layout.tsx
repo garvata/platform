@@ -1,6 +1,7 @@
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from "@/components/ui/toaster"
 import { ClerkProvider, SignedIn, SignedOut, UserButton } from '@clerk/nextjs'
+import { dark } from '@clerk/themes'
 import { Menu, Package2 } from "lucide-react"
 import Link from "next/link"
 import "./globals.css"
@@ -25,23 +26,43 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link rel="icon" href="/favicon.ico" type="image/x-icon" />
-        <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+        <link rel="icon" href="/favicon.ico" />
       </head>
       <body className="bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <ClerkProvider>
+          <ClerkProvider appearance={{
+            baseTheme: dark,
+            elements: {
+              'card': 'shadow-none',
+            },
+          }}>
             <SignedIn>
               <AppLayout>{children}</AppLayout>
             </SignedIn>
             <SignedOut>
-              {children}
+              <SignedOutLayout>{children}</SignedOutLayout>
             </SignedOut>
           </ClerkProvider>
           <Toaster />
         </ThemeProvider>
       </body>
     </html>
+  )
+}
+
+function SignedOutLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col min-h-screen">
+      <header className="flex items-center justify-between border-b bg-background px-4 py-2">
+        <Link href="/" className="flex items-center gap-2 text-lg font-semibold">
+          <Package2 className="h-6 w-6" />
+          <span>Garvata</span>
+        </Link>
+      </header>
+      <div className="flex items-center justify-center flex-grow py-10">
+        {children}
+      </div>
+    </div>
   )
 }
 

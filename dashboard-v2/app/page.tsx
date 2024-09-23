@@ -1,5 +1,6 @@
-import { SignedIn, SignedOut, SignInButton } from '@clerk/nextjs'
 import { Button } from "@/components/ui/button"
+import { SignedIn, SignedOut } from '@clerk/nextjs'
+import Link from 'next/link'
 
 export default function Home() {
   return (
@@ -14,9 +15,9 @@ export default function Home() {
         <div className="hero min-h-screen flex flex-col items-center justify-center ">
           <h2 className="text-5xl font-bold mb-4">Welcome to Garvata</h2>
           <p className="text-lg mb-6">Please sign in to access Garvata features.</p>
-          <SignInButton mode="modal">
+          <Link href="/sign-in">
             <Button variant="outline" size="lg">Sign In</Button>
-          </SignInButton>
+          </Link>
         </div>
       </SignedOut>
     </div>
